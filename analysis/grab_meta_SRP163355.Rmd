@@ -1,0 +1,42 @@
+---
+title: "Metadata Extraction Examples"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(recount3)
+
+url_SRP163355_meta <- locate_url(
+  "SRP163355",
+  "data_sources/sra"
+)
+local_SRP163355_meta <- file_retrieve(
+  url = url_SRP163355_meta
+)
+
+## Read the metadata
+SRP163355_meta <- read_metadata(local_SRP163355_meta)
+```
+
+Now that we have pulled the metadata we can now extract the study specific sample info. From experience the most 
+useful field is **usually** `sra.experiment_title`
+
+```{r}
+custom_meta <- SRP163355_meta %>% 
+  mutate(name = external_id,
+         condition = str_extract(sra.experiment_title, '\\w+\\d*rep') %>% 
+           gsub('rep','',.)) %>% 
+  select(name, condition)
+custom_meta %>% sample_n(10)
+```
+
+Print it for use in the plotting script
+```{r}
+write_tsv(custom_meta, file = 'SRP163355_meta.tsv', col_names = FALSE)
+```
+
+Run the demo script
+```{bash}
+Rscript violin_heatmap_demo.R SRP163355 SRP163355_meta.tsv gene.txt human SRP163355
+```
