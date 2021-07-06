@@ -71,7 +71,7 @@ bit kludgy as I'm not certain how to grab the rowRanges info to get the `ENSG000
 ```{r}
 tic()
 bind_rows(gtex_data_build %>% mutate(Expression = `643`),
-          sra_data_build) %>% mutate(Expression = `8232`) %>% 
+          sra_data_build %>% mutate(Expression = `8232`)) %>% 
   ggplot(aes(x=Tissue, y = log2(Expression + 1))) + 
     geom_boxplot() + 
   coord_flip() +
