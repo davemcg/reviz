@@ -1,0 +1,108 @@
+---
+title: "Snapcount Timing"
+author: David McGaughey
+date: "2021-07-06"
+output: html_notebook
+---
+
+# Load libraries
+Tic toc is a lightweight timer
+```{r}
+library(snapcount)
+library(tictoc)
+```
+
+# Pull data with snapcount / snaptron
+One gene
+
+About 2 seconds for GTEx and 3-10 seconds for SRAv3H
+```{r}
+tic()
+sb <- QueryBuilder(compilation="gtex", regions=c("PAX6"))
+pax6_gtex_gene <- query_gene(sb)
+gtex_one_gene <- toc()
+
+tic()
+sb <- QueryBuilder(compilation="srav3h", regions="PAX6")
+pax6_sra3h_gene <- query_gene(sb)
+sra_one_gene <- toc()
+```
+# Pull in metadata from eyeIntegration
+Has a bunch of tissue level ocular data
+```{r}
+meta <- read_tsv('https://hpc.nih.gov/~mcgaugheyd/eyeIntegration/2019_metadata_04.tsv.gz')
+```
+# Make a "retina + GTEx" plot
+
+## Extract data
+```{r}
+library(tidyverse)
+
+tic()
+gtex_data_build <- assay(pax6_gtex_gene) %>% 
+  # back to dense matrix
+  as.matrix() %>% 
+  # rotate
+  t() %>% 
+  # turn to tibble
+  as_tibble(rownames = 'name') %>% 
+  # add in column data
+  left_join(colData(pax6_gtex_gene) %>% as_tibble(rownames = 'name')) %>% 
+  # label genes
+  filter(Sample %in% meta$sample_accession) %>% 
+  # join with meta
+  left_join(meta, by = c('Sample' = 'sample_accession'))
+gtex_data_toc <- toc()
+
+tic()
+sra_data_build <- assay(pax6_sra3h_gene) %>% 
+  as.matrix() %>% 
+  t() %>% 
+  as_tibble(rownames = 'name') %>% 
+  left_join(colData(pax6_sra3h_gene) %>% as_tibble(rownames = 'name')) %>% 
+  filter(sample_acc %in% meta$sample_accession) %>% 
+  # join with meta
+  left_join(meta, by = c('sample_acc' = 'sample_accession'))
+sra_data_toc <- toc()
+```
+
+## Plot
+bit kludgy as I'm not certain how to grab the rowRanges info to get the `ENSG00000049449` version of Pax6
+```{r}
+tic()
+bind_rows(gtex_data_build %>% mutate(Expression = `643`),
+          sra_data_build) %>% mutate(Expression = `8232`) %>% 
+  ggplot(aes(x=Tissue, y = log2(Expression + 1))) + 
+    geom_boxplot() + 
+  coord_flip() +
+  theme_minimal()
+ggplot_toc <- toc()
+```
+
+# Timings
+THIS DOES NOT INCLUDE THE TIME IT TAKES TO DRAW THE GGPLOT IMAGE WHICH IS A FEW SECONDS
+```{r}
+tictoc_extract <- function(tictoc_data, name){
+  time <- tictoc_data$toc - tictoc_data$tic
+  time <- enframe(time) 
+  time$name <- name
+  time
+}
+timings <- bind_rows(tictoc_extract(gtex_one_gene, 'snapcount (GTEx)'),
+          tictoc_extract(sra_one_gene, 'snapcount (SRA3H)'),
+          tictoc_extract(gtex_data_toc, 'reformat GTEx data '),
+          tictoc_extract(sra_data_toc, 'reformat SRA data'),
+          tictoc_extract(ggplot_toc, 'ggplot2 call')) %>% 
+  rename(value = 'Time') 
+
+timings 
+
+timings %>% 
+  ggplot(aes(x=name,y=Time)) + 
+  geom_bar(stat='identity') +
+  coord_flip() +
+  theme_minimal() +
+  ylab('Time (seconds)') +
+  xlab('')
+
+```
