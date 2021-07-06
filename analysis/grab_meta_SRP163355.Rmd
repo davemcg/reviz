@@ -17,6 +17,7 @@ local_SRP163355_meta <- file_retrieve(
 
 ## Read the metadata
 SRP163355_meta <- read_metadata(local_SRP163355_meta)
+
 ```
 
 Now that we have pulled the metadata we can now extract the study specific sample info. From experience the most 
@@ -36,7 +37,45 @@ Print it for use in the plotting script
 write_tsv(custom_meta, file = 'SRP163355_meta.tsv', col_names = FALSE)
 ```
 
-Run the demo script
-```{bash}
-Rscript violin_heatmap_demo.R SRP163355 SRP163355_meta.tsv gene.txt human SRP163355
+Grab the data for plotting
+
+This will take several minutes
+```{R}
+gene <- c("PRX$") 
+source('../src/r3_data_puller.R')
+SRP163355_gene <- r3_data_puller(type = 'gene', 
+                                 study_accession = 'SRP163355', 
+                                 meta = meta, 
+                                 gene = gene, 
+                                 organism = 'human')
+
+SRP163355_exon <- r3_data_puller(type = 'exon', 
+                                 study_accession = 'SRP163355', 
+                                 meta = meta, 
+                                 gene = gene, 
+                                 organism = 'human')
+
+library(snapcount)
+sb <- QueryBuilder(compilation="gtex", regions="PRX")
+prx_gtex_gene <- query_gene(sb)
+prx_gtex_exon <- query_exon(sb)
+
+```
+
+# Gene Plot
+```{r}
+SRP163355_gene %>% 
+  filter(gene_name == 'PRX') %>% 
+  ggplot(aes(x=Condition, y=log2(value+1), fill = Condition)) +
+  geom_boxplot() +
+  theme_cowplot() +
+  guides(x =  guide_axis(angle = 90)) +
+  scale_fill_manual(values = c(pals::brewer.set1(n=12), pals::brewer.set2(n=10)) %>% unname()) +
+  xlab('Condition') + 
+  facet_wrap(~gene_name, ncol = 5, scales = 'free_x')
+```
+
+# Add in GTEx
+```{r}
+
 ```
