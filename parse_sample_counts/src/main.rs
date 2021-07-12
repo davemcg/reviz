@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufReader, BufRead, BufWriter, Write, stdout, stdin};
+use std::io::{ BufRead, BufWriter, Write, stdout, stdin};
 use std::collections::HashMap;
 //use regex::Regex;
 //use lazy_static::lazy_static;
@@ -8,7 +8,7 @@ fn main() {
     //let sample_counts_file = fs::File::open(stdin()).expect("bad input");
     //let outfile = fs::File::create("parsed_counts.tsv").unwrap();
     let mut  writer = BufWriter::new(stdout());
-    let snaptron_ids = fs::read_to_string("../ids.txt").unwrap();
+    let snaptron_ids = fs::read_to_string("/data/swamyvs/reviz/ids.txt").unwrap();
     let snaptron_ids = snaptron_ids.split("\n").collect::<Vec<&str>>();
     let mut id_mapper:HashMap<&str, usize> = HashMap::new();
     for i in 0..snaptron_ids.len() {
