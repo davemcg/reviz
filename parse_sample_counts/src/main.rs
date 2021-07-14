@@ -61,5 +61,9 @@ fn parse_line(line: String, whitelist_set:&HashSet<String>) -> String{
     let msg = String::from("N");
     empty_vec.retain(|x| x != &msg);
     let clean_string = empty_vec.join("\n");
-    return clean_string + "\n";
+    if clean_string == ""{ // line may not contain any whitelist samples
+        return String::from("");
+    } else {
+        return clean_string + "\n";
+    }
 }
