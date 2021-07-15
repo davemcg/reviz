@@ -39,11 +39,11 @@ echo "Finished Reading gtex exon counts"
 echo "CREATE TABLE gene_counts_long(snaptron_id, sample_id, counts); 
 .mode csv ; 
 .import ${geneCounts} gene_counts_long; 
-CREATE INDEX idx ON gene_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
+CREATE INDEX idx_gene ON gene_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
 echo "Finished Writing gene db"
 
 echo "CREATE TABLE exon_counts_long(snaptron_id, sample_id, counts); 
 .mode csv ; 
 .import ${exonCounts} exon_counts_long; 
-CREATE INDEX idx ON exon_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
+CREATE INDEX idx_exon ON exon_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
 echo "Finished Writing exon db"
