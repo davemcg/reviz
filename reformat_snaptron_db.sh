@@ -3,8 +3,10 @@
 ## requires ~ 20GB + 8 cpus
 module load SQLite
 mkdir -p sql_files
-counts=$1
-db=$2
+prefix=$1 # make sure this is a valid path
+geneCounts="${prefix}_gene.csv"
+exonCounts="${prefix}_exon.csv"
+db="${prefix}_reformatted.db"
 # wget -O sql_files/sra3vh_genes.sqlite http://snaptron.cs.jhu.edu/data/srav3h/genes.sqlite //81Gb 
 # wget -O recount3_sra3h_samples.tsv http://snaptron.cs.jhu.edu/data/srav3h/samples.tsv
 # wget -O sql_files/sra3vh_exons.sqlite http://snaptron.cs.jhu.edu/data/srav3h/exons.sqlite //879Gb
@@ -15,19 +17,33 @@ db=$2
 
 ## make sure parse_sample_counts is built with `cargo build --release`
 ## run src/make_snaptron_whitelist.R to make whietlist
-rm -f $counts
+rm -f $geneCounts
+rm -f $exonCounts
 rm -f $db 
-mkdir -p counts_long
+## SRA-gene
+sqlite3 sql_files/sra3vh_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${geneCounts}"
+echo "Finished Reading sra3vh gene counts"
 
-sqlite3 sql_files/sra3vh_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 1000m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${counts}"
-echo "Finished Reading sra3vh"
+## SRA-exon
+sqlite3 sql_files/sra3vh_exons.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${exonCounts}"
+echo "Finished Reading sra3vh exon counts"
 
-sqlite3 sql_files/gtex_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 1000m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${counts}"
+## Gtex-gene
+sqlite3 sql_files/gtex_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${geneCounts}"
+echo "Finished Reading gtex gene counts"
 
-echo "Finished Reading GTEX"
+## Gtex-exon
+sqlite3 sql_files/gtex_exons.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${exonCounts}"
+echo "Finished Reading gtex exon counts"
 
-echo "CREATE TABLE counts_long(snaptron_id, sample_id, counts); 
+echo "CREATE TABLE gene_counts_long(snaptron_id, sample_id, counts); 
 .mode csv ; 
-.import ${counts} counts_long; 
-CREATE INDEX idx ON counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
-echo "Finished Writing db"
+.import ${geneCounts} gene_counts_long; 
+CREATE INDEX idx ON gene_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
+echo "Finished Writing gene db"
+
+echo "CREATE TABLE exon_counts_long(snaptron_id, sample_id, counts); 
+.mode csv ; 
+.import ${exonCounts} exon_counts_long; 
+CREATE INDEX idx ON exon_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
+echo "Finished Writing exon db"
