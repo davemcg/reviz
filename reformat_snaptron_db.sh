@@ -37,13 +37,13 @@ sqlite3 sql_files/gtex_exons.sqlite 'SELECT snaptron_id, samples FROM "intron" '
 echo "Finished Reading gtex exon counts"
 
 echo "CREATE TABLE gene_counts_long(snaptron_id, sample_id, counts); 
-.mode csv ; 
-.import ${geneCounts} gene_counts_long; 
+.mode csv  
+.import ${geneCounts} gene_counts_long
 CREATE INDEX idx_gene ON gene_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
 echo "Finished Writing gene db"
 
 echo "CREATE TABLE exon_counts_long(snaptron_id, sample_id, counts); 
-.mode csv ; 
-.import ${exonCounts} exon_counts_long; 
+.mode csv 
+.import ${exonCounts} exon_counts_long 
 CREATE INDEX idx_exon ON exon_counts_long(snaptron_id, sample_id);" | sqlite3 -batch $db 
 echo "Finished Writing exon db"
