@@ -11,55 +11,133 @@ library(shiny)
 library(tidyverse)
 library(InteractiveComplexHeatmap)
 library(ComplexHeatmap)
+library(fst)
+library(DBI)
+library(RSQLite)
 suppressMessages(library(recount3))
 suppressMessages(library(cowplot))
-# For making example data
-# library(snapcount)
-# library(SummarizedExperiment)
-# get_snapcount_data_long <- function(db, gene, qfunc) {
-#     sb <- QueryBuilder(compilation=db, regions=gene)
-#     snapcount_raw_data <- qfunc(sb)
-#     snap_count_long_data <- assay(snapcount_raw_data) %>%
-#         as.matrix() %>%
-#         t() %>%
-#         as_tibble(rownames = 'name') %>%
-#         left_join(colData(snapcount_raw_data) %>% as_tibble(rownames = 'name')) #%>%
-#         #dplyr::rename(Expression = `643`)
-#     return(snap_count_long_data)
-# }
-# get_snapcount_data_long('gtex', 'PAX6', query_exon) %>% write_tsv('example_app_data_exon.tsv')
-# k <- get_snapcount_data_long('gtex', 'PAX6', query_exon)
-# 
+#setwd('/data/swamyvs/reviz/viz) #setwd to app 
+### run these to make fst's for app, change file paths accordingly
 
-
-# - boxplot (one gene only????)
-# - user input for metadata file (tsv with run_accession / metadata col) ?????
-# - heatmap exon view (violin_heatmap_demo.R) has some code bits for this
-# - bonus: splice graph exon view??????
+## Format for the new long sqlite file is `snaptron_id,sample_id,counts` (snaptron_id is a custom gene identifier)
+## both snaptron_id and sample_id will need to be mapped to gene_name and SRA_accession accordingly
+## theoretically this could be done upstream during the db (with little channge in run time) but right now this is where we're at
+make_EiaD_st <- function(){
     
-genes <-  c('PAX6$', 'CRYGA', 'CRYB', 'CRYA', 'HSF4','PROX1$', 'RARB','SIX3$', 'PRX$')
+    EiaD_st <-  read_tsv('/data/swamyvs/EiaD_build/sampleTable_2019-05-25_tissues.tab') %>% 
+        rename(sample_accession = `#sample_accession`)
+    snaptron_st <- data.table::fread('/data/swamyvs/reviz/recount3_sra3h_samples.tsv') %>% as_tibble 
+    snaptron_gtex_st <- data.table::fread('/data/swamyvs/reviz/recount3_gtex_samples.tsv') %>% as_tibble
+    all_snaptron <- bind_rows(snaptron_st%>% select(rail_id, run_accession=external_id),
+                              snaptron_gtex_st %>% select(rail_id, run_accession = run_acc))
+    eiad_in_snaptron <- EiaD_st %>% inner_join(all_snaptron) %>% mutate(rail_id = as.character(rail_id))
+    write_fst(eiad_in_snaptron, 'app_data/eiad_snaptron_sample_table.fst')
+    ALL_STUDY_ACCESSIONS <- unique(eiad_in_snaptron$study_accession)
+    ALL_SRS_ACCESSIONS <- unique(eiad_in_snaptron$sample_accession)
+    save(ALL_STUDY_ACCESSIONS, ALL_SRS_ACCESSIONS, file = 'app_data/samples_and_studies.Rdata')
+}
+#make_EiaD_st()
+cache_Snaptron_proj_info <- function(){
+    r3_projects <- available_projects(organism = 'human' ) %>% as_tibble()
+    write_fst(r3_projects, 'app_data/recount3_proj_info.fst')
+    
+}
+## run this to pull raw snaptron sqlite files and reformat to long indexed sql files 
+## https://github.com/vinay-swamy/reviz/blob/demo/reformat_snaptron_db.sh
 
-#data <- data.table::fread('/Users/swamyvs/NIH/reviz/example_app_data.tsv') %>% as_tibble 
-# Define UI for application that draws a histogram
+## pull snaptron_id to gene_name from original snaptron sqlite file
+## sqlite3 sql_files/sra3vh_genes.sqlite "SELECT snaptron_id, right_annotated FROM intron" > viz/app_data/snaptronid2gene_name.txt    
+## sqlite3 sql_files/sra3vh_exons.sqlite "SELECT snaptron_id, right_annotated FROM intron" > viz/app_data/snaptronid2exon_name.txt
+
+make_snaptron_id_converters <- function(){
+    gene_mapper <- read_delim('app_data/snaptronid2gene_name.txt', delim = '|', col_names = c('snaptron_id', 'raw')) %>% 
+        mutate(gene_id = str_split(raw, ':') %>% sapply(function(x) x[1]), 
+               gene_name = str_split(raw, ':') %>% sapply(function(x) x[2]), 
+               gene_type = str_split(raw, ':') %>% sapply(function(x) x[3])) %>% 
+        select(-raw)
+    ## I'm not totally sure how to interpret the way they annotate exons, should revisit this at a later date.
+    exon_mapper <- read_delim('app_data/snaptronid2exon_name.txt', delim = '|', col_names = c('snaptron_id', 'raw')) %>% 
+        mutate(left = str_split(raw, ':') %>% sapply(function(x) x[1]), 
+               right = str_split(raw, ':') %>% sapply(function(x) x[2]),
+               gene_id = left
+               ) %>% 
+        left_join(gene_mapper %>% select(-snaptron_id)) %>% 
+        mutate(gene_name = replace(gene_name, is.na(gene_name), gene_id[is.na(gene_name)]),
+               gene_type = replace(gene_name, is.na(gene_name), 'missing gene_name/unclear annotation') ) %>% 
+        select(-raw, -left, -right)
+    gene_mapper <- gene_mapper %>% mutate(snaptron_id = as.character(snaptron_id))
+    exon_mapper <- exon_mapper %>% mutate(snaptron_id = as.character(snaptron_id))
+    write_fst(gene_mapper, 'app_data/snaptron_id_2_gene_name.fst')
+    write_fst(exon_mapper, 'app_data/snaptron_id_2_exon_name.fst')
+    ALL_GENE_NAMES <- unique(gene_mapper$gene_name)
+    ALL_EXON_NAMES <- unique(exon_mapper$gene_name)
+    save(ALL_GENE_NAMES, ALL_EXON_NAMES, file = 'app_data/valid_gene_exon_names.Rdata')
+}
+#make_snaptron_id_converters()
+
+pull_data_from_db <- function(mapper, table_name, gene, srs_acc=NA, study_acc=NA){
+    # srs_acc = head(core_metadata$sample_accession)
+    # study_acc= NA
+    # gene= c('PAX6', 'VSX1')
+    qdata <- tbl(CON, table_name)
+    ## All the ID lookups could be be sped up with a Hashtable, but might add to load times
+    t_sample_ids <- c()
+    if(any(!is.na(srs_acc))){
+        t_sample_ids <- c( t_sample_ids, filter(CORE_METADATA, sample_accession %in% srs_acc) %>% pull(rail_id) )
+    }
+    if(any(!is.na(study_acc))){
+        t_sample_ids <- c(t_sample_ids,  filter(CORE_METADATA, study_accession %in% study_acc) %>% pull(rail_id) )
+    }
+    t_snaptron_id <- mapper %>% filter(gene_name %in% gene) %>% pull(snaptron_id)# haven't checked if snaptron_id<>gene_name is 1:1
+    count_data <- qdata %>% filter(snaptron_id %in% t_snaptron_id, sample_id %in% t_sample_ids) %>% collect()
+    count_data %>% 
+        dplyr::rename(rail_id = sample_id) %>%  
+        inner_join(mapper) %>% 
+        left_join(CORE_METADATA) %>% 
+        mutate(counts = as.numeric(counts),
+               counts = replace_na(counts, 0)) 
+
+}
+# plot_data <- pull_data_from_db(GENE_NAME_MAPPER, 'gene_counts_long', c('PAX6', 'VSX1'), 
+#                                srs_acc =head(ALL_SRS_ACCESSIONS), study_acc = 'SRP070148')
+#plot_data <- pull_data_from_db(EXON_NAME_MAPPER, 'exon_counts_long', 'PAX6', srs_acc =head(ALL_SRS_ACCESSIONS))
+
+
+A <- Sys.time()
+CORE_METADATA <- read_fst('app_data/eiad_snaptron_sample_table.fst')
+RECOUNT_PROJ_INFO <- read_fst('app_data/recount3_proj_info.fst')
+GENE_NAME_MAPPER <- read_fst('app_data/snaptron_id_2_gene_name.fst')
+EXON_NAME_MAPPER <- read_fst('app_data/snaptron_id_2_exon_name.fst')
+load('app_data/valid_gene_exon_names.Rdata')# loads all_gene_names, all_exon_names
+load('app_data/samples_and_studies.Rdata')# all_study_accessions, all_srs_accessions 
+DB_FILE <- '/data/swamyvs/reviz/counts_long/EiaD_in_snaptron_reformatted.db'
+B <- Sys.time()
+#print(B-A) # Time difference of 0.7401347 secs
+CON<- dbConnect(SQLite(), dbname = DB_FILE)
+
+
+
 ui <- fluidPage(
     titlePanel('rEvIZ'),
     column(4,
         fileInput('user_metadata', 'Enter a csv with meta data'),
-        selectizeInput('proj_ids', 'Select a SRA Project ID', choices = c('SRP163355',"SRP151763" ), multiple = F, 
-                       selected = 'SRP163355'),
-        actionButton('load_data', 'Load Data')
+        selectizeInput('proj_ids', 'Select a SRA Project ID', choices = NULL, multiple = T),
+        
+        selectizeInput('acc_ids', 'Enter SRA Accession IDs', choices = NULL, multiple = T)
     ),
     column(8,   
         tabsetPanel(type = 'tabs',
                         tabPanel('Gene Expression Violin Plot',
-                                 selectizeInput('vp_gene_input', 'Select a gene(s)', choices =genes, multiple=T, 
-                                                selected = genes[1]),
+                                 selectizeInput('vp_gene_input', 'Select a gene(s)', choices =NULL, multiple=T),
+                                 selectizeInput('vp_color_choice', 'Select Metadata to color on',
+                                                choices = c( 'Tissue', 'Sub_Tissue', 'Origin'),
+                                                selected = 'Sub_Tissue',
+                                                multiple=F),
                                  actionButton('draw_vp', 'Draw Violin Plots'),
                                  plotOutput('vp_plot')
                         ),
                         tabPanel('Exon Heatmap',
-                                 selectizeInput('hm_gene_input', 'Select one gene', choices = genes, multiple =F,
-                                                selected = genes[1]),
+                                 selectizeInput('hm_gene_input', 'Select one gene', choices = NULL, multiple =F),
                                  actionButton('draw_hm', 'Draw Heatmap'),
                                  InteractiveComplexHeatmapOutput("exon_hm")
                         )
@@ -71,102 +149,51 @@ ui <- fluidPage(
 
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
-    #input <- list(proj_ids = 'SRP163355', vp_gene_input  = "PAX6$",hm_gene_input= "PAX6$")
+    #input <- list(proj_ids = 'SRP163355', vp_gene_input  = "PAX6$",hm_gene_input= "PAX6", vp_color_choice = 'Sub_Tissue')
+    updateSelectizeInput(session,inputId = 'proj_ids', choices = ALL_STUDY_ACCESSIONS, server = T, selected = 'SRP070148' )
+    updateSelectizeInput(session,inputId = 'acc_ids', choices = ALL_SRS_ACCESSIONS, server = T, selected = ALL_SRS_ACCESSIONS[1:10])
+    updateSelectizeInput(session,inputId = 'vp_gene_input', choices = ALL_GENE_NAMES, server = T , selected = c('PAX6', 'VSX1') )
+    updateSelectizeInput(session,inputId = 'hm_gene_input', choices = ALL_EXON_NAMES, server = T , selected = 'PAX6')
 
-    observeEvent(input$load_data, {
+    observeEvent(input$draw_vp, {
         
-        r3_projects <- available_projects(organism = 'human' )
-        proj_info <- subset(
-            r3_projects,
-            project == isolate(input$proj_ids) & project_type == "data_sources"
-        )
-        file <- isolate(input$user_metadata)
-        #meta <- read_tsv('analysis/SRP163355_meta.tsv')
-        meta <- read_tsv(file$datapath)
-        colnames(meta) <- c('name', 'Condition')
-        observeEvent(input$draw_vp, {
-            output$vp_plot <- renderPlot({
-                
-                rse_study_gene <- create_rse(proj_info, type = 'gene')
-                assay(rse_study_gene, "counts") <- transform_counts(rse_study_gene)
-                assays(rse_study_gene)$TPM <- recount::getTPM(rse_study_gene, length_var = "score")
-                counts <- data.frame(assays(rse_study_gene)$counts)
-                gene_quant <- counts[rowRanges(rse_study_gene) %>% 
-                                         as_tibble(rownames = 'id') %>% 
-                                         filter(grepl(paste0(input$vp_gene_input, collapse = '|'), 
-                                                      gene_name, ignore.case= TRUE)) %>% 
-                                         pull(gene_id) %>% unique(), ]
-                gene_quant %>%
-                    as_tibble(rownames = 'gene_id') %>% 
-                    pivot_longer(cols = contains('SRR')) %>% 
-                    left_join(rowRanges(rse_study_gene) %>% as_tibble(), by = 'gene_id') %>% 
-                    left_join(meta, by = 'name') %>% 
-                    ggplot(aes(x=Condition, y=log2(value+1), fill = Condition)) +
-                    #geom_point() + 
-                    geom_boxplot() +
-                    #scattermore::geom_scattermore(pointsize = 3, position = position_dodge(width = 1)) +
-                    #geom_boxplot(width = 0.3)+
-                    theme_cowplot() +
-                    guides(x =  guide_axis(angle = 90)) +
-                    scale_fill_manual(values = c(pals::brewer.set1(n=12), pals::brewer.set2(n=10)) %>% unname()) +
-                    xlab('Gene') + facet_wrap(~gene_name, ncol = 5, scales = 'free_x')
-            
-            })
-        })
-        
-        observeEvent(input$draw_hm, {
-            rse_study_exon <- create_rse(proj_info, type = 'exon')
-            assay(rse_study_exon, "counts") <- transform_counts(rse_study_exon)
-            assays(rse_study_exon)$TPM <- recount::getTPM(rse_study_exon, length_var = "score")
-            gene_exon_tpm <- assays(rse_study_exon)$counts[
-                rowRanges(rse_study_exon) %>% 
-                    as_tibble(rownames = 'id') %>% 
-                    filter(grepl(input$hm_gene_input, 
-                                 gene_name, 
-                                 ignore.case= TRUE), 
-                           transcript_type == 'protein_coding') %>% 
-                    pull(recount_exon_id) %>% 
-                    unique(),]
-            # grab metadata
-            gene_exon_tpm_meta <- gene_exon_tpm %>% 
-                as_tibble(rownames = 'recount_exon_id') %>% 
-                left_join(rowRanges(rse_study_exon) %>% 
-                              as_tibble(rownames = 'id'), 
-                          by = 'recount_exon_id') 
-            
-            # build tx column info
-            # source('../src/complex_heatmap_annotation_builders.R')
-        source('/Users/swamyvs/NIH/reviz/src/complex_heatmap_annotation_builders.R')
-            out_col = tx_col_df_maker(gene_exon_tpm_meta) 
-            out_row <- tx_row_df_maker(meta)
-            
-            user_colors <- list(out_row$colors)
-            row_color_name <- 'Condition'
-            names(user_colors) <- row_color_name
-            # ha_column = HeatmapAnnotation(df = out_col$df, col = out_col$colors, 
-            #                               show_legend = FALSE)
-            ha_row <- rowAnnotation(df = out_row$df,
-                                    col = user_colors,
-                                    name = "Condition")
-            ht <- Heatmap(t(log2(gene_exon_tpm+1)), 
-                    cluster_rows = FALSE, 
-                    cluster_columns = FALSE, 
-                    name = 'log2(Gene Expression+1)',
-                    col = viridis::viridis(n=10), 
-                    #top_annotation = ha_column,
-                    right_annotation = ha_row
-            )
-            ht <- draw(ht)
-            makeInteractiveComplexHeatmap(input, output, session, ht)
+        output$vp_plot <- renderPlot({
+            plot_data <- pull_data_from_db(GENE_NAME_MAPPER, 'gene_counts_long',input$vp_gene_input, input$acc_ids, input$proj_ids)
+            ggplot(plot_data, aes(x=!!as.symbol(input$vp_color_choice), 
+                                  y=log2(counts+1), 
+                                  fill = !!as.symbol(input$vp_color_choice)
+                                  )) +
+                geom_violin()+
+                geom_boxplot(width = .1) +
+                xlab('') + 
+                ylab('log2(count+1)') +
+                facet_wrap(~gene_name) +
+                theme_cowplot()
+
         })
     })
-    
+    observeEvent(input$draw_hm, {
+        id_cols <- colnames(plot_data)[!colnames(plot_data)%in% c('counts', 'rail_id', 'sample_accession', 'run_accession')]
+        hm_plot_data <-  plot_data %>% pivot_wider(names_from = sample_accession, values_from = counts, id_cols = id_cols ) 
+        mat <-hm_plot_data %>% select(-id_cols) %>% as.matrix %>% {log2(. +1)}
+        rownames(mat) <- hm_plot_data$snaptron_id
         
-
-    
-    
-    
-}
+        ht <- Heatmap(mat,
+                      cluster_rows = FALSE,
+                      cluster_columns = FALSE,
+                      show_row_names = F, 
+                      name = 'log2(xxon counts+1)',
+                      col = viridis::viridis(n=100)
+        )
+        ht <- draw(ht)
+        makeInteractiveComplexHeatmap(input, output, session, ht)
+    })
+}    
 
 # Run the application 
 shinyApp(ui = ui, server = server)
+
+
+
+
+
