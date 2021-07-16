@@ -75,32 +75,43 @@ make_snaptron_id_converters <- function(){
 }
 #make_snaptron_id_converters()
 
-pull_data_from_db <- function(mapper, table_name, gene, srs_acc=NA, study_acc=NA){
-    # srs_acc = head(core_metadata$sample_accession)
+pull_data_from_db <- function(metadata, mapper, table_name, gene, srs_acc=NA, study_acc=NA){
+    # srs_acc = head(metadata$sample_accession)
     # study_acc= NA
     # gene= c('PAX6', 'VSX1')
     qdata <- tbl(CON, table_name)
     ## All the ID lookups could be be sped up with a Hashtable, but might add to load times
     t_sample_ids <- c()
     if(any(!is.na(srs_acc))){
-        t_sample_ids <- c( t_sample_ids, filter(CORE_METADATA, sample_accession %in% srs_acc) %>% pull(rail_id) )
+        t_sample_ids <- c( t_sample_ids, filter(metadata, sample_accession %in% srs_acc) %>% pull(rail_id) )
     }
     if(any(!is.na(study_acc))){
-        t_sample_ids <- c(t_sample_ids,  filter(CORE_METADATA, study_accession %in% study_acc) %>% pull(rail_id) )
+        t_sample_ids <- c(t_sample_ids,  filter(metadata, study_accession %in% study_acc) %>% pull(rail_id) )
     }
     t_snaptron_id <- mapper %>% filter(gene_name %in% gene) %>% pull(snaptron_id)# haven't checked if snaptron_id<>gene_name is 1:1
     count_data <- qdata %>% filter(snaptron_id %in% t_snaptron_id, sample_id %in% t_sample_ids) %>% collect()
     count_data %>% 
         dplyr::rename(rail_id = sample_id) %>%  
         inner_join(mapper) %>% 
-        left_join(CORE_METADATA) %>% 
+        left_join(metadata) %>% 
         mutate(counts = as.numeric(counts),
                counts = replace_na(counts, 0)) 
 
 }
-# plot_data <- pull_data_from_db(GENE_NAME_MAPPER, 'gene_counts_long', c('PAX6', 'VSX1'), 
+# plot_data <- pull_data_from_db(CORE_METADATA, GENE_NAME_MAPPER, 'gene_counts_long', c('PAX6', 'VSX1'), 
 #                                srs_acc =head(ALL_SRS_ACCESSIONS), study_acc = 'SRP070148')
-#plot_data <- pull_data_from_db(EXON_NAME_MAPPER, 'exon_counts_long', 'PAX6', srs_acc =head(ALL_SRS_ACCESSIONS))
+#plot_data <- pull_data_from_db(CORE_METADATA, EXON_NAME_MAPPER, 'exon_counts_long', 'PAX6', srs_acc =head(ALL_SRS_ACCESSIONS))
+
+## make example user-proivided metadata
+# CORE_METADATA %>% arrange(desc(Age_Days)) %>% head(100) %>% 
+#     mutate(Age = as.numeric(Age_Days) %>% replace_na(-1)) %>% 
+#     mutate(Developmental_time = case_when(
+#         Age >= 90 ~ 'Oldest',
+#         Age  >= 60 & Age < 90 ~ 'Oldish',
+#         Age < 60 ~ 'Not Old'
+#     )) %>% select(sample_accession, Developmental_time) %>% 
+#     write_tsv('app_data/example_user_provided_metadata.tsv')
+
 
 
 A <- Sys.time()
@@ -110,7 +121,8 @@ GENE_NAME_MAPPER <- read_fst('app_data/snaptron_id_2_gene_name.fst')
 EXON_NAME_MAPPER <- read_fst('app_data/snaptron_id_2_exon_name.fst')
 load('app_data/valid_gene_exon_names.Rdata')# loads all_gene_names, all_exon_names
 load('app_data/samples_and_studies.Rdata')# all_study_accessions, all_srs_accessions 
-DB_FILE <- '/data/swamyvs/reviz/counts_long/EiaD_in_snaptron_reformatted.db'
+DB_FILE <- 'app_data/EiaD_in_snaptron_reformatted.db'
+METACOLS <- c( 'Tissue', 'Sub_Tissue', 'Origin')
 B <- Sys.time()
 #print(B-A) # Time difference of 0.7401347 secs
 CON<- dbConnect(SQLite(), dbname = DB_FILE)
@@ -121,6 +133,7 @@ ui <- fluidPage(
     titlePanel('rEvIZ'),
     column(4,
         fileInput('user_metadata', 'Enter a csv with meta data'),
+        actionButton('upload_user_data', 'Press to Upload Metadata'),
         selectizeInput('proj_ids', 'Select a SRA Project ID', choices = NULL, multiple = T),
         
         selectizeInput('acc_ids', 'Enter SRA Accession IDs', choices = NULL, multiple = T)
@@ -130,7 +143,7 @@ ui <- fluidPage(
                         tabPanel('Gene Expression Violin Plot',
                                  selectizeInput('vp_gene_input', 'Select a gene(s)', choices =NULL, multiple=T),
                                  selectizeInput('vp_color_choice', 'Select Metadata to color on',
-                                                choices = c( 'Tissue', 'Sub_Tissue', 'Origin'),
+                                                choices = METACOLS,
                                                 selected = 'Sub_Tissue',
                                                 multiple=F),
                                  actionButton('draw_vp', 'Draw Violin Plots'),
@@ -154,11 +167,43 @@ server <- function(input, output, session) {
     updateSelectizeInput(session,inputId = 'acc_ids', choices = ALL_SRS_ACCESSIONS, server = T, selected = ALL_SRS_ACCESSIONS[1:10])
     updateSelectizeInput(session,inputId = 'vp_gene_input', choices = ALL_GENE_NAMES, server = T , selected = c('PAX6', 'VSX1') )
     updateSelectizeInput(session,inputId = 'hm_gene_input', choices = ALL_EXON_NAMES, server = T , selected = 'PAX6')
-
+    
+    
+    
+    observeEvent(input$upload_user_data, {
+        file <- isolate(input$user_metadata)
+        new_meta <- read_tsv(file$datapath)
+        CORE_METADATA <- CORE_METADATA %>% left_join(new_meta) 
+        CORE_METADATA[is.na(CORE_METADATA)] <- '.'
+        .GlobalEnv$CORE_METADATA <- CORE_METADATA
+        ALL_SRS_ACCESSIONS <- unique(CORE_METADATA$sample_accession)
+        updateSelectizeInput(session,inputId = 'acc_ids', choices = ALL_SRS_ACCESSIONS, server = T, selected = new_meta$sample_accession)
+        METACOLS <- c(METACOLS, colnames(new_meta)[-1])
+        updateSelectizeInput(session,inputId = 'vp_color_choice', choices = METACOLS, server = T )
+    })
+    
     observeEvent(input$draw_vp, {
         
         output$vp_plot <- renderPlot({
-            plot_data <- pull_data_from_db(GENE_NAME_MAPPER, 'gene_counts_long',input$vp_gene_input, input$acc_ids, input$proj_ids)
+            if(length(input$user_metadata) >0){
+                file <- isolate(input$user_metadata)
+                new_meta <- read_tsv(file$datapath)
+                CORE_METADATA <- CORE_METADATA %>% inner_join(new_meta) 
+                cat('inside\n', file= stderr())
+                cat(colnames(CORE_METADATA), file= stderr())
+            }
+            
+            plot_data <- pull_data_from_db(CORE_METADATA, GENE_NAME_MAPPER, 'gene_counts_long',input$vp_gene_input, input$acc_ids, input$proj_ids)
+            
+            # for(i in input$user_metadata){
+            #     cat(i, file = stderr())
+            # }
+            
+            cat('outside plot data \n', file= stderr())
+            cat(colnames(plot_data), file= stderr())
+            cat('outside core_tight data \n', file= stderr())
+            cat(colnames(CORE_METADATA), file= stderr())
+            
             ggplot(plot_data, aes(x=!!as.symbol(input$vp_color_choice), 
                                   y=log2(counts+1), 
                                   fill = !!as.symbol(input$vp_color_choice)
