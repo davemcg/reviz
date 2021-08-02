@@ -50,7 +50,8 @@ fn main() {
 
     if let Some(gene_mapper_file) = matches.value_of("genemapper"){
         for exon_id in read_to_string(gene_mapper_file).expect("failed to read gene_mapper_file").split("\n"){
-            let line_split =exon_id.split(",").collect::<Vec<&str>>();
+            //exon_id,gene_name
+            let line_split = exon_id.split(",").collect::<Vec<&str>>();
             &gene_mapper.insert(String::from(line_split[0]), String::from(line_split[1]));
 
         }
@@ -123,7 +124,11 @@ fn parse_line_whitelist(line: String, whitelist_set:&HashSet<String>) -> String{
 fn parse_line_genemapper(line: String, gene_mapper:&HashMap<String, String>, sampleid_mapper:&HashMap<String, usize>) -> String{
     let line_data_raw:Vec<&str> = line.split('|').collect();
     let snaptron_id = String::from(line_data_raw[0]);
-    let gene_name = gene_mapper.get(&snaptron_id).expect("snaptron id in gene_mapper");
+    let try_gene_name = gene_mapper.get(&snaptron_id);
+    let gene_name = match try_gene_name {
+        Some(try_gene_name) => try_gene_name.clone(),
+        None => snaptron_id.clone()
+    };
     //line_data_raw[1] = sample_counts
     let line_vec = line_data_raw[1].trim_matches(',').split(',').collect::<Vec<&str>>();
     let mut empty_vec = vec!["0"; sampleid_mapper.len()];

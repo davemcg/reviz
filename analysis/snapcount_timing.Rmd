@@ -10,6 +10,8 @@ Tic toc is a lightweight timer
 ```{r}
 library(snapcount)
 library(tictoc)
+library(tidyverse)
+library(SummarizedExperiment)
 ```
 
 # Pull data with snapcount / snaptron
@@ -27,10 +29,51 @@ sb <- QueryBuilder(compilation="srav3h", regions="PAX6")
 pax6_sra3h_gene <- query_gene(sb)
 sra_one_gene <- toc()
 ```
+
+## all in one 
+```{r}
+t_gene <- "PAX6"
+sb <- QueryBuilder(compilation="srav3h", regions="PAX6")
+pax6_sra3h_gene <- query_gene(sb)
+meta <- read_tsv('SRP163355_meta.tsv')
+colnames(meta) <- c('external_id', 'Condition')
+snaptronId2GeneSym <- read_delim('../snaptron_id_to_gene_name.txt', delim = ':', col_names = c('snaptron_id', 'gene_name') )
+counts <- assay(pax6_sra3h_gene) %>% 
+  as.matrix() %>% 
+  t() %>% 
+  as_tibble(rownames = 'name') 
+  match_column <- colnames(counts)[-1] %>% {filter(snaptronId2GeneSym, snaptron_id %in% ., gene_name == "PAX6")} %>% pull(snaptron_id)
+counts_gene_meta <- counts %>% select(name, expression := as.symbol(!!match_column) ) %>% 
+  left_join(colData(pax6_sra3h_gene) %>% as_tibble(rownames = 'name')) %>% 
+  inner_join(meta) %>% 
+  select(external_id, expression, Condition) %>% 
+  mutate(gene_name = t_gene)
+ggplot(counts_gene_meta, aes(x=Condition, y=log2(expression+1), fill = Condition)) +
+                    #geom_point() + 
+                    geom_boxplot() +
+                    #scattermore::geom_scattermore(pointsize = 3, position = position_dodge(width = 1)) +
+                    #geom_boxplot(width = 0.3)+
+                    theme_cowplot() +
+                    guides(x =  guide_axis(angle = 90)) +
+                    scale_fill_manual(values = c(pals::brewer.set1(n=12), pals::brewer.set2(n=10)) %>% unname()) +
+                    xlab('Gene') + facet_wrap(~gene_name, ncol = 5, scales = 'free_x')
+  
+
+```
+
+
+```{r}
+sb <- QueryBuilder(compilation="srav3h", regions="CRX")
+pax6_sra3h_gene <- query_exon(sb)
+
+snapcount::qu
+```
+
+
 # Pull in metadata from eyeIntegration
 Has a bunch of tissue level ocular data
 ```{r}
-meta <- read_tsv('https://hpc.nih.gov/~mcgaugheyd/eyeIntegration/2019_metadata_04.tsv.gz')
+
 ```
 # Make a "retina + GTEx" plot
 
@@ -40,12 +83,9 @@ library(tidyverse)
 
 tic()
 gtex_data_build <- assay(pax6_gtex_gene) %>% 
-  # back to dense matrix
   as.matrix() %>% 
-  # rotate
   t() %>% 
-  # turn to tibble
-  as_tibble(rownames = 'name') %>% 
+  as_tibble(rownames = 'name') #%>% 
   # add in column data
   left_join(colData(pax6_gtex_gene) %>% as_tibble(rownames = 'name')) %>% 
   # label genes
@@ -55,14 +95,8 @@ gtex_data_build <- assay(pax6_gtex_gene) %>%
 gtex_data_toc <- toc()
 
 tic()
-sra_data_build <- assay(pax6_sra3h_gene) %>% 
-  as.matrix() %>% 
-  t() %>% 
-  as_tibble(rownames = 'name') %>% 
-  left_join(colData(pax6_sra3h_gene) %>% as_tibble(rownames = 'name')) %>% 
-  filter(sample_acc %in% meta$sample_accession) %>% 
-  # join with meta
-  left_join(meta, by = c('sample_acc' = 'sample_accession'))
+#sra_data_build <- 
+
 sra_data_toc <- toc()
 ```
 
