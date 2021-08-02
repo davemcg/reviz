@@ -65,7 +65,11 @@ fn main() {
     if (sampleid_mapper.len()==0 && gene_mapper.len() > 0) || (sampleid_mapper.len() > 0 && gene_mapper.len() == 0){
         panic!("Missing input for either sampleid_mapper or gene_mapper")
     }
-
+    if gene_mapper.len() > 0{
+        let sample_ids_all = &sampleid_mapper.keys().cloned().collect::<Vec<String>>().join(",");
+        let header = format!("{},{},{}\n", "gene_name", "snaptron_id", sample_ids_all);
+        &writer.write_all(header.as_bytes());
+    }
 
     for line in reader.lines() {
         let mut clean_line:String;
