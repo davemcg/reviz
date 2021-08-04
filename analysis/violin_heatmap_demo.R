@@ -6,26 +6,28 @@ args = commandArgs(trailingOnly=TRUE)
 
 # e.g. SRP163355
 # only one!
-project_accession <- args[1] #c("SRP163355")#,"SRP119291", "SRP091605")
-
+# project_accession <- args[1] #c("SRP163355")#,"SRP119291", "SRP091605")
+project_accession <- c("SRP163355","SRP119291")#,"SRP119291", "SRP091605")
 # metadata file
 # tsv where the first column is the run_accession and the second column is the metadata field 
 # e.g. genotype or age or tissue or whatever
 # NO COLUMN NAMES
-meta <- read_tsv(args[2])
+#meta <- read_tsv(args[2])
+meta <- read_tsv('analysis/SRP163355_meta.tsv', col_names = F)
 colnames(meta) <- c('name', 'Condition')
 # violin/boxplot plot genes
 ## below genes are for a few lens related TF and crystallins (structural component of lens)
-## gene <- c('PAX6$', 'CRYGA', 'CRYB', 'CRYA', 'HSF4','PROX1$', 'RARB','SIX3$', 'PRX$')
+gene <- c('PAX6$', 'CRYGA', 'CRYB', 'CRYA', 'HSF4','PROX1$', 'RARB','SIX3$', 'PRX$')
 ## give as one gene per line. regex's allowed.
 ## FIRST GENE will be the "exon" gene
-gene <- scan(args[3], what = 'character')
+#gene <- scan(args[3], what = 'character')
 # heatmap gene 
 #gene_exon <- '^PRX$'
 gene_exon <- gene[1]
 
 # have to give species
-r3_projects <- available_projects(organism = args[4])
+#r3_projects <- available_projects(organism = args[4])
+r3_projects <- available_projects(organism = 'human' )
 # grab project info 
 proj_info <- subset(
   r3_projects,
@@ -76,7 +78,7 @@ gene_quant %>%
   as_tibble(rownames = 'gene_id') %>% 
   pivot_longer(cols = contains('SRR')) %>% 
   left_join(rowRanges(rse_study_gene) %>% as_tibble(), by = 'gene_id') %>% 
-  left_join(meta, by = 'name') %>% 
+  left_join(meta, by = 'name') -> plot_data#%>% 
   ggplot(aes(x=Condition, y=log2(value+1), fill = Condition)) +
   #geom_point() + 
   geom_boxplot() +
@@ -110,7 +112,8 @@ gene_exon_tpm_meta <- gene_exon_tpm %>%
             by = 'recount_exon_id') 
 
 # build tx column info
-source('../src/complex_heatmap_annotation_builders.R')
+# source('../src/complex_heatmap_annotation_builders.R')
+source('src/complex_heatmap_annotation_builders.R')
 out_col = tx_col_df_maker(gene_exon_tpm_meta) 
 out_row <- tx_row_df_maker(meta)
 
@@ -123,7 +126,7 @@ ha_row <- rowAnnotation(df = out_row$df,
                         col = user_colors,
                         name = "Condition")
 ## make heatmap plot
-pdf(width = 8, height = 10, file = paste0(args[5], '_exon.pdf'))
+pdf(width = 8, height = 10, file = paste0('tmp', '_exon.pdf'))
 row.names(gene_exon_tpm) <- gsub('\\|', ' ', row.names(gene_exon_tpm))
 Heatmap(t(log2(gene_exon_tpm+1)), 
         cluster_rows = FALSE, 
@@ -131,7 +134,8 @@ Heatmap(t(log2(gene_exon_tpm+1)),
         name = 'log2(Gene Expression+1)',
         col = viridis::viridis(n=10), 
         top_annotation = ha_column,
-        right_annotation = ha_row)
+        right_annotation = ha_row
+        )
 dev.off()
 
 

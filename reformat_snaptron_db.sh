@@ -20,22 +20,17 @@ db="${prefix}_reformatted.db"
 rm -f $geneCounts
 rm -f $exonCounts
 rm -f $db 
+### load all gene data, subset exon data.
+
 ## SRA-gene
-sqlite3 sql_files/sra3vh_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${geneCounts}"
+sqlite3 sql_files/sra3vh_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts  >> ${geneCounts}"
 echo "Finished Reading sra3vh gene counts"
 
-## SRA-exon
-sqlite3 sql_files/sra3vh_exons.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${exonCounts}"
-echo "Finished Reading sra3vh exon counts"
-
 ## Gtex-gene
-sqlite3 sql_files/gtex_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${geneCounts}"
+sqlite3 sql_files/gtex_genes.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts  >> ${geneCounts}"
 echo "Finished Reading gtex gene counts"
 
-## Gtex-exon
-sqlite3 sql_files/gtex_exons.sqlite 'SELECT snaptron_id, samples FROM "intron" ' | parallel --blocksize 500m --pipe "parse_sample_counts/target/release/parse_sample_counts -w Eiad_in_snaptron_whitelist.txt >> ${exonCounts}"
-echo "Finished Reading gtex exon counts"
-
+## do not add semi colons after the `.` statements
 echo "CREATE TABLE gene_counts_long(snaptron_id, sample_id, counts); 
 .mode csv  
 .import ${geneCounts} gene_counts_long
