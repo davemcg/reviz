@@ -43,13 +43,16 @@ fn main() {
     if let Some(whitelist_file) = matches.value_of("whitelist"){
         let wl_samples = read_to_string(whitelist_file)
                                 .expect("Bad Whitelist File");               
-        for sample in wl_samples.split("\n"){
+        for sample in wl_samples.trim().split("\n"){
             whitelist_set.insert(String::from(sample));
         }
     } 
 
     if let Some(gene_mapper_file) = matches.value_of("genemapper"){
-        for exon_id in read_to_string(gene_mapper_file).expect("failed to read gene_mapper_file").split("\n"){
+        
+        let lines = read_to_string(gene_mapper_file).expect("failed to read gene_mapper_file");
+        
+        for exon_id in lines.trim().split("\n"){
             //exon_id,gene_name
             let line_split = exon_id.split(",").collect::<Vec<&str>>();
             &gene_mapper.insert(String::from(line_split[0]), String::from(line_split[1]));
@@ -58,7 +61,7 @@ fn main() {
     }
     
     if let Some(sampleid_mapper_file) = matches.value_of("sampleids"){
-        for (i, sample_id) in read_to_string(sampleid_mapper_file).expect("failed to read sampleids_mapper_file").split("\n").enumerate(){
+        for (i, sample_id) in read_to_string(sampleid_mapper_file).expect("failed to read sampleids_mapper_file").trim().split("\n").enumerate(){
             &sampleid_mapper.insert(String::from(sample_id), i);
         }
     }
